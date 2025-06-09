@@ -1,7 +1,14 @@
 import Message from '../js/objects/Message.js';
 import User from '../js/objects/User.js';
 var username = "";
-const socket = io("https://bcf5-2409-4090-201b-4809-41c3-aead-c882-930b.ngrok-free.app");
+const socket = io("http://192.168.31.57:5000");
+
+window.addEventListener("beforeunload", () => {
+  if(user && user.peerID) {
+    socket.emit("manualDisconnect", JSON.stringify(user));
+  }
+});
+
 var user;
 var meetingID = window.location.pathname.split("/")[2];
 var chatHidden = false;
@@ -118,10 +125,18 @@ peer.on("open", id => {
     peerID = id;
     console.log("connection established: " + peerID);
 })
-window.onbeforeunload = function () {
-    e.preventDefault();
-    e.returnValue = 'Test';
-}
+window.onbeforeunload = (e) => {
+  e.preventDefault();
+  e.returnValue = ''; // Chrome requires returnValue to be set
+};
+
+// window.addEventListener("beforeunload", () => {
+//   if(user && user.peerID) {
+//     socket.emit("manualDisconnect", JSON.stringify(user));
+//   }
+// });
+
+
 const toggleMute = () =>{
     let enabled = myVideoStream.getAudioTracks()[0].enabled;
     console.log(enabled);
@@ -182,16 +197,42 @@ const connectToNewUser = (userId, stream) => {
     })
     call.on('close', () => {
         video.remove()
+        removeVideoStream(call.peer);
     })
     peers[userId] = call
 }
+
+// This function removes the video stream by userID
+const removeVideoStream = (userID) => {
+  const video = document.getElementById(userID);
+  if (video) {
+    video.remove();
+    console.log(`Video removed for user: ${userID}`);
+    updateVideoGridLayout(); // Recalculate layout
+  }
+};
+
+
 socket.on('userDisconnected', function (msg) {
     const data = JSON.parse(msg);
-    if (peers[data.userID]){
-        peers[data.userID].close()
+    const userID = data.userID;
+
+    // Close the peer connection if it exists
+    if (peers[userID]) {
+        peers[userID].close();
+        delete peers[userID];
     }
-    $("#"+data.userID).remove();
-})
+
+    // Remove the video stream from the grid
+    removeVideoStream(userID);
+});
+
+socket.on('manualDisconnect', (msg) => {
+  // Broadcast to all others to remove the user who disconnected (refresh/close)
+  socket.broadcast.emit('userDisconnected', msg);
+});
+
+
 socket.on('message', function (msg) {
     if (msg == "userExists") {
         createUser(true)
@@ -207,21 +248,34 @@ socket.on('message', function (msg) {
     }
 });
 const addVideoStream = (video, stream, userID) => {
-    video.srcObject = stream
+    video.srcObject = stream;
     video.autoplay = true;
     video.id = userID;
+
     video.addEventListener('loadedmetadata', () => {
         video.play();
-        if(document.querySelectorAll('.cameras video').length > 5 && document.getElementById('video-grid') !== null){
-            $("#video-grid").attr('id', 'video-grid-plus5');
-            videoGrid = document.getElementById('video-grid-plus5');
-        } else if (document.querySelectorAll('.cameras video').length < 5 && document.getElementById('video-grid-plus5') !== null)  {
-            $("#video-grid").attr('id', 'video-grid-plus5');
-            videoGrid = document.getElementById("video-grid");
-        }
-        videoGrid.append(video);
-    })
-}
+
+        const videoGrid = document.getElementById('video-grid');
+        videoGrid.appendChild(video);
+
+        updateVideoGridLayout(); // Update layout after adding
+    });
+};
+
+// Call this function whenever videos are added/removed
+const updateVideoGridLayout = () => {
+  const grid = document.getElementById("video-grid");
+  const count = grid.querySelectorAll("video").length;
+
+  grid.className = "video-grid"; // reset
+  if (count > 9) {
+    grid.classList.add("video-grid-10plus");
+  } else {
+    grid.classList.add(`video-grid-${count}`);
+  }
+};
+
+
 const createUser = (exists) => {
     var message = exists ? "Username taken, please enter valid a username to join this meeting." : "Please enter a username to join this meeting."
     Swal.fire({
