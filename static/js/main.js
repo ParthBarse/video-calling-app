@@ -1,7 +1,7 @@
 import Message from '../js/objects/Message.js';
 import User from '../js/objects/User.js';
 var username = "";
-const socket = io();
+const socket = io("https://bcf5-2409-4090-201b-4809-41c3-aead-c882-930b.ngrok-free.app");
 var user;
 var meetingID = window.location.pathname.split("/")[2];
 var chatHidden = false;
@@ -64,15 +64,33 @@ window.onload = () => {
         toggleVideo();
         console.log("Video "+  myVideoStream.getVideoTracks()[0].enabled)
     });
+    $("#screenShare").on('click', function () {
+    startScreenShare();
+});
+    $("#screenShareIcon").toggleClass("active");
 }
 var peer = new Peer({
     config: {
         'iceServers': [
-            { url: 'stun:stun.l.google.com:19302' }
+            { urls: 'stun:stun.l.google.com:19302' }, // Free STUN
+
+            // Add TURN server here (example: openrelay.metered.ca, free tier)
+            // {
+            //     urls: 'turn:openrelay.metered.ca:443',
+            //     username: 'openrelayproject',
+            //     credential: 'openrelayproject'
+            // }
+            {
+                urls: 'turn:93.127.185.248:3478',
+                username: 'bnbturnserver',
+                credential: 'bnbturnserver'
+            }
         ]
     },
     secure: true
 });
+
+
 const isUUID = (uuid) => {
     let s = "" + uuid;
     s = s.match('^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$');
@@ -224,5 +242,62 @@ const createUser = (exists) => {
         $("#app").attr('style', '');
         user = new User(username, meetingID, peerID);
         socket.emit("checkUser", JSON.stringify(user));
+    });
+};
+
+
+const startScreenShare = async () => {
+    try {
+        const screenStream = await navigator.mediaDevices.getDisplayMedia({
+            video: {
+                cursor: "always"
+            },
+            audio: true // You can toggle this if needed
+        });
+
+        // Replace tracks in existing peer connections
+        for (let peerId in peers) {
+            let sender = peers[peerId].peerConnection.getSenders().find(s => s.track.kind === 'video');
+            if (sender) {
+                sender.replaceTrack(screenStream.getVideoTracks()[0]);
+            }
+        }
+
+        // Replace local video element
+        const screenVideo = document.createElement("video");
+        screenVideo.id = "myScreen";
+        screenVideo.muted = true;
+        addVideoStream(screenVideo, screenStream, "myScreen");
+
+        // When screen sharing ends
+        screenStream.getVideoTracks()[0].addEventListener('ended', () => {
+            stopScreenShare();
+        });
+
+    } catch (e) {
+        console.error("Failed to share screen: ", e);
+    }
+};
+
+
+const stopScreenShare = () => {
+    navigator.mediaDevices.getUserMedia({
+        video: true,
+        audio: true
+    }).then((stream) => {
+        myVideoStream = stream;
+
+        // Replace tracks in existing peer connections
+        for (let peerId in peers) {
+            let sender = peers[peerId].peerConnection.getSenders().find(s => s.track.kind === 'video');
+            if (sender) {
+                sender.replaceTrack(stream.getVideoTracks()[0]);
+            }
+        }
+
+        const myVideo = document.getElementById(peerID);
+        if (myVideo) {
+            myVideo.srcObject = stream;
+        }
     });
 };
